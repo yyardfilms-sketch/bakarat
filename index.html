@@ -13,7 +13,7 @@
   שני דברים שאפשר לשנות:
 
   1) BUILDINGS — רשימת המבנים ההתחלתית. אפשר גם להוסיף מבנה מתוך האפליקציה.
-  2) FIREBASE  — אם תמלא את זה, שניכם תראו את אותם הנתונים בזמן אמת.
+  2) SUPABASE — אם תמלא את זה, שניכם תראו את אותם הנתונים בזמן אמת.
                  אם תשאיר אותו ריק (כמו עכשיו), האפליקציה עובדת רק במכשיר שלך
                  (נשמר בדפדפן). הוראות מלאות בתחתית הקובץ.
 */
@@ -24,13 +24,10 @@ const BUILDINGS = ["100","101","102","103","104","105","106","107","108"];
 // משאיר את הנתונים תחת נתיב שקשה לנחש. אם הכל ריק/מקומי — לא משנה.
 const SITE_KEY = "my-quality-project";
 
-// אם תרצה סנכרון בין שניכם — מלא את הערכים מ-Firebase כאן (ראה הוראות למטה).
-const FIREBASE = {
-  apiKey: "",
-  authDomain: "",
-  databaseURL: "",
-  projectId: "",
-  appId: ""
+// אם תרצה סנכרון בין שניכם — מלא את הערכים מ-Supabase כאן (ראה הוראות למטה).
+const SUPABASE = {
+  url: "https://zrqxhypimpmjmkzegsqh.supabase.co",      // Project URL,  למשל  https://abcdxyz.supabase.co
+  anonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpycXhoeXBpbXBtam1remVnc3FoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE3NjUzOTIsImV4cCI6MjA5NzM0MTM5Mn0.bHHANlOqvwB8Zw3Y0BGh7Eujth9wVacid_yQrcsPGCk"   // anon public key  (מתוך Settings → API)
 };
 </script>
 
@@ -262,7 +259,7 @@ let current = state.buildings[0];
 let store = null;
 
 const $ = s => document.querySelector(s);
-const cfgOn = FIREBASE.apiKey && FIREBASE.databaseURL;
+const cfgOn = SUPABASE.url && SUPABASE.anonKey;
 
 /* persisted name (per device) */
 const NAME_KEY = "qa_inspector_name";
@@ -313,42 +310,55 @@ function makeLocalStore(){
 }
 
 async function makeRemoteStore(){
-  const appMod = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
-  const db = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
-  const app = appMod.initializeApp(FIREBASE);
-  const database = db.getDatabase(app);
-  const base = `sites/${SITE_KEY}`;
+  const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2");
+  const supabase = createClient(SUPABASE.url, SUPABASE.anonKey);
+  const sk = SITE_KEY;
   let cb = ()=>{};
   let snap = { buildings: BUILDINGS.slice(), items: {} };
 
-  // seed building list once if missing
-  const bRef = db.ref(database, `${base}/buildings`);
-  const existing = await db.get(bRef);
-  if(!existing.exists()) await db.set(bRef, BUILDINGS.slice());
+  const toItem = r => ({ text:r.text, status:r.status, addedBy:r.added_by, addedAt:r.added_at, resolvedBy:r.resolved_by, resolvedAt:r.resolved_at });
 
-  db.onValue(db.ref(database, base), s=>{
-    const v = s.val() || {};
-    snap = {
-      buildings: Array.isArray(v.buildings) && v.buildings.length ? v.buildings : BUILDINGS.slice(),
-      items: v.items || {}
-    };
-    cb(structuredClone(snap));
-  });
+  async function loadAll(){
+    const [{data:bRows}, {data:iRows}] = await Promise.all([
+      supabase.from("qa_buildings").select("building").eq("site_key", sk),
+      supabase.from("qa_items").select("*").eq("site_key", sk)
+    ]);
+    let buildings = (bRows||[]).map(r=>r.building);
+    if(!buildings.length){
+      await supabase.from("qa_buildings").insert(BUILDINGS.map(b=>({ site_key:sk, building:b })));
+      buildings = BUILDINGS.slice();
+    }
+    buildings = [...new Set(buildings)].sort();
+    const items = {};
+    (iRows||[]).forEach(r=>{ (items[r.building] = items[r.building] || {})[r.id] = toItem(r); });
+    snap = { buildings, items };
+    return snap;
+  }
+
+  let t;
+  const refresh = ()=>{ clearTimeout(t); t=setTimeout(async()=>{ await loadAll(); cb(structuredClone(snap)); }, 120); };
+
+  supabase.channel("qa-"+sk)
+    .on("postgres_changes",{event:"*",schema:"public",table:"qa_items",filter:"site_key=eq."+sk}, refresh)
+    .on("postgres_changes",{event:"*",schema:"public",table:"qa_buildings",filter:"site_key=eq."+sk}, refresh)
+    .subscribe();
+
+  await loadAll();
 
   return {
     live:true,
     onChange(fn){ cb=fn; cb(structuredClone(snap)); },
-    add(bid,item){ db.push(db.ref(database, `${base}/items/${bid}`), item); },
-    setStatus(bid,id,patch){ db.update(db.ref(database, `${base}/items/${bid}/${id}`), patch); },
-    purge(bid,id){ db.remove(db.ref(database, `${base}/items/${bid}/${id}`)); },
-    purgeHistory(bid){
-      const it = snap.items[bid] || {};
-      Object.keys(it).forEach(id=>{ if(it[id].status!=="active") db.remove(db.ref(database, `${base}/items/${bid}/${id}`)); });
+    add(bid,item){ supabase.from("qa_items").insert({ site_key:sk, building:bid, text:item.text, status:item.status, added_by:item.addedBy, added_at:item.addedAt }).then(refresh); },
+    setStatus(bid,id,patch){
+      const p={};
+      if("status" in patch) p.status = patch.status;
+      if("resolvedBy" in patch) p.resolved_by = patch.resolvedBy;
+      if("resolvedAt" in patch) p.resolved_at = patch.resolvedAt;
+      supabase.from("qa_items").update(p).eq("id", id).then(refresh);
     },
-    addBuilding(b){
-      const list = snap.buildings.slice();
-      if(!list.includes(b)){ list.push(b); list.sort(); db.set(db.ref(database, `${base}/buildings`), list); }
-    }
+    purge(bid,id){ supabase.from("qa_items").delete().eq("id", id).then(refresh); },
+    purgeHistory(bid){ supabase.from("qa_items").delete().eq("site_key",sk).eq("building",bid).neq("status","active").then(refresh); },
+    addBuilding(b){ supabase.from("qa_buildings").upsert({ site_key:sk, building:b }).then(refresh); }
   };
 }
 
@@ -502,7 +512,7 @@ async function boot(){
   try{
     store = cfgOn ? await makeRemoteStore() : makeLocalStore();
   }catch(err){
-    console.error("Firebase failed, falling back to local:", err);
+    console.error("Supabase failed, falling back to local:", err);
     toast("חיבור נכשל — עבר למצב מקומי");
     store = makeLocalStore();
   }
@@ -529,24 +539,49 @@ boot();
       https://<שם-המשתמש>.github.io/quality-tracker/
    זהו — האפליקציה עובדת מיד (מצב מקומי).
 
-ב. סנכרון בין שניכם (אופציונלי, ~5 דקות):
-   1. כנס ל- https://console.firebase.google.com  והתחבר עם גוגל.
-   2. "Add project" → תן שם → אפשר לכבות Analytics → Create.
-   3. בתפריט הצד: Build → Realtime Database → Create Database
-      → בחר מיקום → התחל ב- "Start in test mode" → Enable.
-   4. בעמוד הראשי (גלגל שיניים → Project settings → General):
-      גלול ל- "Your apps" → לחץ על אייקון </> (Web) → תן כינוי → Register.
-      תקבל קטע firebaseConfig. העתק ממנו את הערכים אל FIREBASE שבראש הקובץ:
-        apiKey, authDomain, databaseURL, projectId, appId
-      (אם databaseURL לא מופיע שם — קח אותו מעמוד ה-Realtime Database,
-       זה נראה כמו  https://xxxx-default-rtdb.firebaseio.com )
+ב. סנכרון בין שניכם עם SUPABASE (אופציונלי, ~5 דקות):
+   1. כנס ל- https://supabase.com  והתחבר (אפשר עם גוגל / GitHub).
+   2. "New project" → תן שם, בחר סיסמה למסד הנתונים, בחר Region קרוב → Create.
+      (לוקח דקה-שתיים עד שהפרויקט מוכן.)
+   3. בתפריט הצד פתח "SQL Editor" → New query → הדבק את כל הבלוק הבא → Run:
+
+      create table qa_buildings (
+        site_key text not null,
+        building text not null,
+        primary key (site_key, building)
+      );
+
+      create table qa_items (
+        id          uuid primary key default gen_random_uuid(),
+        site_key    text not null,
+        building    text not null,
+        text        text not null,
+        status      text not null default 'active',
+        added_by    text,
+        added_at    bigint,
+        resolved_by text,
+        resolved_at bigint
+      );
+
+      alter table qa_buildings enable row level security;
+      alter table qa_items     enable row level security;
+
+      create policy "public buildings" on qa_buildings for all using (true) with check (true);
+      create policy "public items"     on qa_items     for all using (true) with check (true);
+
+      alter publication supabase_realtime add table qa_buildings;
+      alter publication supabase_realtime add table qa_items;
+
+   4. בתפריט הצד: Settings → API. העתק שני ערכים אל SUPABASE שבראש הקובץ:
+        Project URL        →  url
+        anon public key    →  anonKey
    5. שמור והעלה את הקובץ מחדש ל-GitHub. עכשיו כל מי שפותח את הכתובת
       רואה את אותם הנתונים בזמן אמת.
 
-   הערת פרטיות: ב-test mode כל מי שיודע את הכתובת יכול לקרוא/לכתוב.
-   ה-SITE_KEY שבראש הקובץ שומר את הנתונים תחת נתיב שקשה לנחש — שנה אותו
-   למשהו אישי, וודא שהוא זהה אצל שניכם. לאבטחה מלאה צריך התחברות (Auth),
-   שזה שלב נוסף — תגיד לי אם תרצה ואוסיף.
+   הערת פרטיות: המדיניות למעלה (using true) פותחת קריאה/כתיבה לכל מי שיש לו
+   ה-anon key (שגלוי בעמוד). ה-SITE_KEY שבראש הקובץ מפריד את הנתונים שלכם —
+   שנה אותו למילה אישית, זהה אצל שניכם. לאבטחה מלאה צריך התחברות (Auth) +
+   מדיניות מחמירה יותר — שלב נוסף, תגיד לי אם תרצה ואוסיף.
 
 ג. הוספת מבנים: או בכפתור "+" שבאפליקציה, או בעריכת השורה BUILDINGS למעלה.
 =================================================================
