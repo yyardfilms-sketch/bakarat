@@ -1,0 +1,555 @@
+<!doctype html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>בקרת איכות — רשימת מעקב</title>
+
+<!-- ============================================================= -->
+<!--  הגדרות — ערוך כאן בלבד                                        -->
+<!-- ============================================================= -->
+<script>
+/*
+  שני דברים שאפשר לשנות:
+
+  1) BUILDINGS — רשימת המבנים ההתחלתית. אפשר גם להוסיף מבנה מתוך האפליקציה.
+  2) FIREBASE  — אם תמלא את זה, שניכם תראו את אותם הנתונים בזמן אמת.
+                 אם תשאיר אותו ריק (כמו עכשיו), האפליקציה עובדת רק במכשיר שלך
+                 (נשמר בדפדפן). הוראות מלאות בתחתית הקובץ.
+*/
+
+const BUILDINGS = ["100","101","102","103","104","105","106","107","108"];
+
+// מפתח סודי לאחסון משותף — מילה משלכם, שתהיה זהה אצל שניכם.
+// משאיר את הנתונים תחת נתיב שקשה לנחש. אם הכל ריק/מקומי — לא משנה.
+const SITE_KEY = "my-quality-project";
+
+// אם תרצה סנכרון בין שניכם — מלא את הערכים מ-Firebase כאן (ראה הוראות למטה).
+const FIREBASE = {
+  apiKey: "",
+  authDomain: "",
+  databaseURL: "",
+  projectId: "",
+  appId: ""
+};
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700&family=Assistant:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#f4f2ee; --card:#ffffff; --ink:#1c1f24; --muted:#6b7177;
+    --line:#e4e0d8; --line2:#efece6;
+    --accent:#e07a16; --accent-soft:#fbe7cf; --accent-ink:#7a3f00;
+    --ok:#2e7d4f; --ok-soft:#dcefe2;
+    --danger:#b23a2c; --danger-soft:#f3dcd8;
+    --shadow:0 1px 2px rgba(28,31,36,.06), 0 4px 16px rgba(28,31,36,.05);
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Assistant",system-ui,-apple-system,"Segoe UI",sans-serif;
+    font-size:16px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    padding-bottom:env(safe-area-inset-bottom);
+  }
+  h1,h2,h3,.ui{font-family:"Rubik",system-ui,sans-serif}
+
+  /* ---------- header ---------- */
+  header{
+    background:var(--ink); color:#fff;
+    padding:14px 16px calc(14px + env(safe-area-inset-top));
+    padding-top:calc(14px + env(safe-area-inset-top));
+    position:sticky; top:0; z-index:30;
+  }
+  .head-row{display:flex; align-items:center; gap:12px; max-width:760px; margin:0 auto}
+  .brand{display:flex; align-items:center; gap:10px; flex:1; min-width:0}
+  .mark{
+    width:34px;height:34px;border-radius:9px;flex:none;
+    background:var(--accent);
+    display:grid;place-items:center;font-weight:700;color:#1c1f24;
+    font-family:"Rubik";font-size:18px;
+  }
+  .brand h1{font-size:17px;font-weight:600;margin:0;line-height:1.15;letter-spacing:-.2px}
+  .brand .sub{font-size:12px;color:#a8adb3;font-weight:400}
+  .status{
+    display:flex;align-items:center;gap:6px;flex:none;
+    font-family:"Rubik";font-size:12px;font-weight:500;color:#c9ced3;
+    background:#2a2e34;border-radius:999px;padding:5px 10px;cursor:default;
+  }
+  .dot{width:8px;height:8px;border-radius:50%;background:#8b9098}
+  .status.live .dot{background:#5ad18a;box-shadow:0 0 0 3px rgba(90,209,138,.18)}
+  .status.local .dot{background:var(--accent)}
+
+  .name-row{max-width:760px;margin:10px auto 0;display:flex;align-items:center;gap:8px}
+  .name-row label{font-size:12px;color:#a8adb3;font-family:"Rubik";flex:none}
+  .name-row input{
+    flex:1;background:#2a2e34;border:1px solid #3a3f46;color:#fff;
+    border-radius:9px;padding:8px 11px;font-family:"Assistant";font-size:14px;
+  }
+  .name-row input::placeholder{color:#7d838a}
+  .name-row input:focus{outline:none;border-color:var(--accent)}
+
+  /* ---------- buildings ---------- */
+  .wrap{max-width:760px;margin:0 auto;padding:0 16px}
+  .tabs{
+    display:flex;gap:8px;overflow-x:auto;padding:14px 16px;
+    -webkit-overflow-scrolling:touch;scrollbar-width:none;
+    max-width:760px;margin:0 auto;
+  }
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{
+    flex:none;position:relative;cursor:pointer;
+    background:var(--card);border:1.5px solid var(--line);
+    border-radius:12px;padding:9px 16px;min-width:58px;text-align:center;
+    font-family:"Rubik";font-weight:600;font-size:17px;color:var(--ink);
+    transition:transform .08s ease, border-color .12s ease, background .12s ease;
+    user-select:none;
+  }
+  .tab .lbl{font-size:10px;font-weight:500;color:var(--muted);display:block;margin-bottom:1px}
+  .tab:active{transform:scale(.96)}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:#1c1f24}
+  .tab.active .lbl{color:var(--accent-ink)}
+  .tab .badge{
+    position:absolute;top:-7px;inset-inline-start:-7px;
+    background:var(--danger);color:#fff;font-family:"Rubik";font-size:11px;font-weight:700;
+    min-width:20px;height:20px;border-radius:10px;padding:0 5px;
+    display:grid;place-items:center;border:2px solid var(--bg);
+  }
+  .tab.active .badge{border-color:var(--accent)}
+  .tab.add{color:var(--muted);font-weight:600;border-style:dashed}
+
+  /* ---------- add box ---------- */
+  .panel{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:14px;margin-top:4px;
+  }
+  .panel h2{font-size:13px;font-weight:600;color:var(--muted);margin:0 0 10px;
+    text-transform:none;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+  .panel h2 .here{color:var(--ink)}
+  textarea{
+    width:100%;resize:vertical;min-height:70px;
+    border:1.5px solid var(--line);border-radius:11px;
+    padding:11px 12px;font-family:"Assistant";font-size:16px;color:var(--ink);
+    background:#fff;
+  }
+  textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .btn{
+    font-family:"Rubik";font-weight:600;font-size:15px;cursor:pointer;
+    border:none;border-radius:11px;padding:12px 16px;min-height:46px;
+    transition:transform .07s ease, filter .12s ease;display:inline-flex;
+    align-items:center;justify-content:center;gap:7px;
+  }
+  .btn:active{transform:scale(.97)}
+  .btn-primary{background:var(--accent);color:#1c1f24;width:100%;margin-top:10px}
+  .btn-primary:hover{filter:brightness(1.03)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ---------- items ---------- */
+  .section-title{
+    font-family:"Rubik";font-weight:600;font-size:13px;color:var(--muted);
+    margin:22px 4px 10px;display:flex;align-items:center;gap:8px;
+  }
+  .section-title .count{background:var(--line);color:var(--ink);border-radius:999px;
+    padding:1px 9px;font-size:12px}
+  .item{
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:13px 14px;margin-bottom:10px;
+    animation:pop .18s ease;
+  }
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .item.leaving{animation:leave .22s ease forwards}
+  @keyframes leave{to{opacity:0;transform:translateX(-12px) scale(.97);height:0;
+    margin:0;padding-top:0;padding-bottom:0;overflow:hidden}}
+  .item .txt{font-size:16px;white-space:pre-wrap;word-break:break-word;line-height:1.45}
+  .item .meta{font-size:12px;color:var(--muted);margin-top:7px;font-family:"Rubik";font-weight:400}
+  .item .actions{display:flex;gap:8px;margin-top:12px}
+  .btn-ok{background:var(--ok-soft);color:var(--ok);flex:1}
+  .btn-del{background:transparent;color:var(--danger);flex:none;
+    border:1.5px solid var(--danger-soft);padding-inline:14px}
+  .btn-restore{background:var(--line2);color:var(--ink);font-size:14px;padding:9px 14px;min-height:40px}
+
+  .badge-status{display:inline-flex;align-items:center;gap:5px;font-family:"Rubik";
+    font-size:11px;font-weight:600;border-radius:999px;padding:3px 9px;margin-bottom:7px}
+  .b-opened{background:var(--ok-soft);color:var(--ok)}
+  .b-deleted{background:var(--danger-soft);color:var(--danger)}
+
+  .empty{text-align:center;color:var(--muted);padding:26px 16px;
+    border:1.5px dashed var(--line);border-radius:var(--radius);background:#fcfbf9}
+  .empty .big{font-size:15px;color:var(--ink);font-family:"Rubik";font-weight:600;margin-bottom:4px}
+
+  /* history collapsible */
+  .hist-head{display:flex;align-items:center;justify-content:space-between;
+    margin:24px 4px 10px;cursor:pointer}
+  .hist-head .lft{display:flex;align-items:center;gap:8px;font-family:"Rubik";
+    font-weight:600;font-size:13px;color:var(--muted)}
+  .chev{transition:transform .18s ease;color:var(--muted)}
+  .hist.open .chev{transform:rotate(180deg)}
+  .hist-body{display:none}
+  .hist.open .hist-body{display:block}
+  .hist .item{background:#faf9f6}
+  .hist-clear{font-family:"Rubik";font-size:12px;color:var(--danger);
+    background:none;border:none;cursor:pointer;font-weight:600;padding:4px}
+
+  footer{max-width:760px;margin:30px auto 22px;padding:0 16px;
+    font-size:12px;color:var(--muted);text-align:center;line-height:1.6}
+
+  .toast{position:fixed;inset-inline:0;bottom:18px;display:flex;justify-content:center;
+    pointer-events:none;z-index:60}
+  .toast span{background:var(--ink);color:#fff;font-family:"Rubik";font-size:14px;
+    padding:11px 18px;border-radius:999px;box-shadow:var(--shadow);
+    opacity:0;transform:translateY(10px);transition:all .22s ease}
+  .toast.show span{opacity:1;transform:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="head-row">
+    <div class="brand">
+      <div class="mark">בא</div>
+      <div style="min-width:0">
+        <h1>בקרת איכות</h1>
+        <div class="sub">רשימת מעקב — שטח</div>
+      </div>
+    </div>
+    <div class="status" id="status" title="מצב סנכרון">
+      <span class="dot"></span><span id="statusText">מקומי</span>
+    </div>
+  </div>
+  <div class="name-row">
+    <label for="nameInput">השם שלי:</label>
+    <input id="nameInput" type="text" placeholder="לדוגמה: יוסי" maxlength="20" autocomplete="off">
+  </div>
+</header>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="wrap">
+  <div class="panel">
+    <h2>תצפית חדשה — מבנה <span class="here" id="addHere">100</span></h2>
+    <textarea id="noteInput" placeholder="מה ראית בשטח? מה בוצע / מה צריך לבדוק..."></textarea>
+    <button class="btn btn-primary" id="addBtn">הוסף לרשימה</button>
+  </div>
+
+  <div class="section-title">פתוחים <span class="count" id="activeCount">0</span></div>
+  <div id="activeList"></div>
+
+  <div class="hist" id="hist">
+    <div class="hist-head" id="histHead">
+      <div class="lft">
+        היסטוריה
+        <span class="chev">▾</span>
+      </div>
+      <button class="hist-clear" id="histClear" style="display:none">נקה היסטוריה</button>
+    </div>
+    <div class="hist-body" id="histList"></div>
+  </div>
+</div>
+
+<footer id="footer"></footer>
+
+<div class="toast" id="toast"><span id="toastText"></span></div>
+
+<script type="module">
+/* ============================== state ============================== */
+let state = { buildings: BUILDINGS.slice(), items: {} };
+let current = state.buildings[0];
+let store = null;
+
+const $ = s => document.querySelector(s);
+const cfgOn = FIREBASE.apiKey && FIREBASE.databaseURL;
+
+/* persisted name (per device) */
+const NAME_KEY = "qa_inspector_name";
+const nameInput = $("#nameInput");
+nameInput.value = localStorage.getItem(NAME_KEY) || "";
+nameInput.addEventListener("input", () => localStorage.setItem(NAME_KEY, nameInput.value.trim()));
+const myName = () => nameInput.value.trim() || "ללא שם";
+
+const now = () => Date.now();
+function fmt(ts){
+  if(!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleDateString("he-IL",{day:"2-digit",month:"2-digit"}) + " " +
+         d.toLocaleTimeString("he-IL",{hour:"2-digit",minute:"2-digit"});
+}
+
+let toastTimer;
+function toast(msg){
+  $("#toastText").textContent = msg;
+  $("#toast").classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>$("#toast").classList.remove("show"), 1900);
+}
+
+/* ============================== stores ============================== */
+/* Each store exposes: ready, onChange(cb), add, setStatus, purge, purgeHistory, addBuilding */
+
+function makeLocalStore(){
+  const KEY = "qa_data_" + SITE_KEY;
+  let data = { buildings: BUILDINGS.slice(), items: {} };
+  try{
+    const raw = localStorage.getItem(KEY);
+    if(raw) data = JSON.parse(raw);
+  }catch(e){}
+  if(!Array.isArray(data.buildings) || !data.buildings.length) data.buildings = BUILDINGS.slice();
+  if(!data.items) data.items = {};
+  let cb = ()=>{};
+  const save = ()=>{ localStorage.setItem(KEY, JSON.stringify(data)); cb(structuredClone(data)); };
+  return {
+    live:false,
+    onChange(fn){ cb=fn; cb(structuredClone(data)); },
+    add(bid,item){ data.items[bid]=data.items[bid]||{}; const id="i"+now()+Math.random().toString(36).slice(2,6); data.items[bid][id]=item; save(); },
+    setStatus(bid,id,patch){ if(data.items[bid]&&data.items[bid][id]){ Object.assign(data.items[bid][id],patch); save(); } },
+    purge(bid,id){ if(data.items[bid]){ delete data.items[bid][id]; save(); } },
+    purgeHistory(bid){ if(data.items[bid]){ for(const id in data.items[bid]){ if(data.items[bid][id].status!=="active") delete data.items[bid][id]; } save(); } },
+    addBuilding(b){ if(!data.buildings.includes(b)){ data.buildings.push(b); data.buildings.sort(); save(); } }
+  };
+}
+
+async function makeRemoteStore(){
+  const appMod = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js");
+  const db = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js");
+  const app = appMod.initializeApp(FIREBASE);
+  const database = db.getDatabase(app);
+  const base = `sites/${SITE_KEY}`;
+  let cb = ()=>{};
+  let snap = { buildings: BUILDINGS.slice(), items: {} };
+
+  // seed building list once if missing
+  const bRef = db.ref(database, `${base}/buildings`);
+  const existing = await db.get(bRef);
+  if(!existing.exists()) await db.set(bRef, BUILDINGS.slice());
+
+  db.onValue(db.ref(database, base), s=>{
+    const v = s.val() || {};
+    snap = {
+      buildings: Array.isArray(v.buildings) && v.buildings.length ? v.buildings : BUILDINGS.slice(),
+      items: v.items || {}
+    };
+    cb(structuredClone(snap));
+  });
+
+  return {
+    live:true,
+    onChange(fn){ cb=fn; cb(structuredClone(snap)); },
+    add(bid,item){ db.push(db.ref(database, `${base}/items/${bid}`), item); },
+    setStatus(bid,id,patch){ db.update(db.ref(database, `${base}/items/${bid}/${id}`), patch); },
+    purge(bid,id){ db.remove(db.ref(database, `${base}/items/${bid}/${id}`)); },
+    purgeHistory(bid){
+      const it = snap.items[bid] || {};
+      Object.keys(it).forEach(id=>{ if(it[id].status!=="active") db.remove(db.ref(database, `${base}/items/${bid}/${id}`)); });
+    },
+    addBuilding(b){
+      const list = snap.buildings.slice();
+      if(!list.includes(b)){ list.push(b); list.sort(); db.set(db.ref(database, `${base}/buildings`), list); }
+    }
+  };
+}
+
+/* ============================== rendering ============================== */
+function setStatusPill(){
+  const el = $("#status");
+  if(store && store.live){ el.className="status live"; $("#statusText").textContent="מסונכרן"; }
+  else { el.className="status local"; $("#statusText").textContent="מקומי"; }
+}
+
+function activeItemsFor(bid){
+  const it = state.items[bid] || {};
+  return Object.entries(it).filter(([,v])=>v.status==="active")
+    .sort((a,b)=>(b[1].addedAt||0)-(a[1].addedAt||0));
+}
+function historyItemsFor(bid){
+  const it = state.items[bid] || {};
+  return Object.entries(it).filter(([,v])=>v.status!=="active")
+    .sort((a,b)=>((b[1].resolvedAt||b[1].addedAt||0)-(a[1].resolvedAt||a[1].addedAt||0)));
+}
+
+function renderTabs(){
+  const tabs = $("#tabs");
+  tabs.innerHTML="";
+  state.buildings.forEach(b=>{
+    const openCount = activeItemsFor(b).length;
+    const t = document.createElement("div");
+    t.className = "tab" + (b===current?" active":"");
+    t.innerHTML = `<span class="lbl">מבנה</span>${b}` +
+      (openCount?`<span class="badge">${openCount}</span>`:"");
+    t.addEventListener("click",()=>{ current=b; renderAll(); });
+    tabs.appendChild(t);
+  });
+  const add = document.createElement("div");
+  add.className="tab add";
+  add.innerHTML=`<span class="lbl">חדש</span>+`;
+  add.addEventListener("click",()=>{
+    const b = (prompt("מספר מבנה חדש:")||"").trim();
+    if(b){ store.addBuilding(b); toast("מבנה "+b+" נוסף"); }
+  });
+  tabs.appendChild(add);
+}
+
+function itemCard(id,v){
+  const el = document.createElement("div");
+  el.className="item";
+  el.innerHTML =
+    `<div class="txt"></div>
+     <div class="meta"></div>
+     <div class="actions">
+       <button class="btn btn-ok">נפתחה ר.ת.</button>
+       <button class="btn btn-del">מחיקה</button>
+     </div>`;
+  el.querySelector(".txt").textContent = v.text;
+  el.querySelector(".meta").textContent = `נוסף ע״י ${v.addedBy||"—"} · ${fmt(v.addedAt)}`;
+  el.querySelector(".btn-ok").addEventListener("click",()=>resolve(id,"opened",el));
+  el.querySelector(".btn-del").addEventListener("click",()=>{
+    if(confirm("למחוק את הפריט? הוא יעבור להיסטוריה.")) resolve(id,"deleted",el);
+  });
+  return el;
+}
+
+function histCard(id,v){
+  const el = document.createElement("div");
+  el.className="item";
+  const isOpen = v.status==="opened";
+  el.innerHTML =
+    `<span class="badge-status ${isOpen?'b-opened':'b-deleted'}">${isOpen?'נפתחה ר.ת.':'נמחק'}</span>
+     <div class="txt"></div>
+     <div class="meta"></div>
+     <div class="actions">
+       <button class="btn btn-restore">↩ שחזר</button>
+     </div>`;
+  el.querySelector(".txt").textContent = v.text;
+  el.querySelector(".meta").textContent =
+    `נוסף: ${v.addedBy||"—"} · ${fmt(v.addedAt)}` +
+    (v.resolvedBy?`  |  ${isOpen?'טופל':'נמחק'} ע״י ${v.resolvedBy} · ${fmt(v.resolvedAt)}`:"");
+  el.querySelector(".btn-restore").addEventListener("click",()=>{
+    store.setStatus(current,id,{status:"active",resolvedBy:null,resolvedAt:null});
+    toast("הפריט שוחזר");
+  });
+  return el;
+}
+
+function renderAll(){
+  $("#addHere").textContent = current;
+  renderTabs();
+
+  const active = activeItemsFor(current);
+  $("#activeCount").textContent = active.length;
+  const list = $("#activeList");
+  list.innerHTML="";
+  if(!active.length){
+    list.innerHTML = `<div class="empty"><div class="big">אין פריטים פתוחים</div>
+      רשום למעלה תצפית מהשטח כדי להתחיל.</div>`;
+  } else {
+    active.forEach(([id,v])=>list.appendChild(itemCard(id,v)));
+  }
+
+  const hist = historyItemsFor(current);
+  const histList = $("#histList");
+  histList.innerHTML="";
+  $("#histClear").style.display = hist.length ? "block" : "none";
+  if(!hist.length){
+    histList.innerHTML = `<div class="empty">עדיין אין היסטוריה במבנה הזה.</div>`;
+  } else {
+    hist.forEach(([id,v])=>histList.appendChild(histCard(id,v)));
+  }
+  $(".hist-head .lft").firstChild.textContent = `היסטוריה (${hist.length}) `;
+}
+
+/* ============================== actions ============================== */
+function addNote(){
+  const ta = $("#noteInput");
+  const text = ta.value.trim();
+  if(!text){ ta.focus(); return; }
+  store.add(current, { text, status:"active", addedBy:myName(), addedAt:now() });
+  ta.value="";
+  toast("נוסף לרשימה");
+}
+function resolve(id,status,el){
+  el.classList.add("leaving");
+  const label = status==="opened" ? "סומן: נפתחה ר.ת." : "נמחק";
+  setTimeout(()=>{
+    store.setStatus(current,id,{status,resolvedBy:myName(),resolvedAt:now()});
+    toast(label);
+  }, 180);
+}
+
+$("#addBtn").addEventListener("click", addNote);
+$("#noteInput").addEventListener("keydown", e=>{
+  if((e.metaKey||e.ctrlKey) && e.key==="Enter") addNote();
+});
+$("#histHead").addEventListener("click", e=>{
+  if(e.target.id==="histClear") return;
+  $("#hist").classList.toggle("open");
+});
+$("#histClear").addEventListener("click", e=>{
+  e.stopPropagation();
+  if(confirm("למחוק לצמיתות את כל ההיסטוריה של מבנה "+current+"?")){
+    store.purgeHistory(current); toast("ההיסטוריה נוקתה");
+  }
+});
+
+/* ============================== boot ============================== */
+$("#footer").textContent = cfgOn
+  ? "מצב משותף · הנתונים מסונכרנים בין כל מי שפותח את העמוד הזה."
+  : "מצב מקומי · הנתונים נשמרים בדפדפן הזה בלבד. למצב משותף — ראה הוראות בקובץ.";
+
+async function boot(){
+  try{
+    store = cfgOn ? await makeRemoteStore() : makeLocalStore();
+  }catch(err){
+    console.error("Firebase failed, falling back to local:", err);
+    toast("חיבור נכשל — עבר למצב מקומי");
+    store = makeLocalStore();
+  }
+  setStatusPill();
+  store.onChange(s=>{
+    state = s;
+    if(!state.buildings.includes(current)) current = state.buildings[0];
+    renderAll();
+  });
+}
+boot();
+</script>
+
+<!--
+=================================================================
+  הוראות הפעלה
+=================================================================
+
+א. העלאה ל-GITHUB PAGES (חינם):
+   1. צור ריפו חדש ב-github.com (לדוגמה: quality-tracker).
+   2. העלה את הקובץ הזה בשם בדיוק:  index.html
+   3. Settings → Pages → Branch: main → Save.
+   4. אחרי דקה תקבל כתובת כמו:
+      https://<שם-המשתמש>.github.io/quality-tracker/
+   זהו — האפליקציה עובדת מיד (מצב מקומי).
+
+ב. סנכרון בין שניכם (אופציונלי, ~5 דקות):
+   1. כנס ל- https://console.firebase.google.com  והתחבר עם גוגל.
+   2. "Add project" → תן שם → אפשר לכבות Analytics → Create.
+   3. בתפריט הצד: Build → Realtime Database → Create Database
+      → בחר מיקום → התחל ב- "Start in test mode" → Enable.
+   4. בעמוד הראשי (גלגל שיניים → Project settings → General):
+      גלול ל- "Your apps" → לחץ על אייקון </> (Web) → תן כינוי → Register.
+      תקבל קטע firebaseConfig. העתק ממנו את הערכים אל FIREBASE שבראש הקובץ:
+        apiKey, authDomain, databaseURL, projectId, appId
+      (אם databaseURL לא מופיע שם — קח אותו מעמוד ה-Realtime Database,
+       זה נראה כמו  https://xxxx-default-rtdb.firebaseio.com )
+   5. שמור והעלה את הקובץ מחדש ל-GitHub. עכשיו כל מי שפותח את הכתובת
+      רואה את אותם הנתונים בזמן אמת.
+
+   הערת פרטיות: ב-test mode כל מי שיודע את הכתובת יכול לקרוא/לכתוב.
+   ה-SITE_KEY שבראש הקובץ שומר את הנתונים תחת נתיב שקשה לנחש — שנה אותו
+   למשהו אישי, וודא שהוא זהה אצל שניכם. לאבטחה מלאה צריך התחברות (Auth),
+   שזה שלב נוסף — תגיד לי אם תרצה ואוסיף.
+
+ג. הוספת מבנים: או בכפתור "+" שבאפליקציה, או בעריכת השורה BUILDINGS למעלה.
+=================================================================
+-->
+</body>
+</html>
